@@ -59,7 +59,7 @@ from ._commit_api import (
     _upload_files,
     _warn_on_overwriting_operations,
 )
-from ._inference_endpoints import InferenceEndpoint, InferenceEndpointType
+from ._inference_endpoints import InferenceEndpoint, InferenceEndpointScalingMetric, InferenceEndpointType
 from ._jobs_api import JobInfo, JobSpec, ScheduledJobInfo, _create_job_spec
 from ._space_api import SpaceHardware, SpaceRuntime, SpaceStorage, SpaceVariable
 from ._upload_large_folder import upload_large_folder_internal
@@ -105,11 +105,13 @@ from .utils import tqdm as hf_tqdm
 from .utils._auth import _get_token_from_environment, _get_token_from_file, _get_token_from_google_colab
 from .utils._deprecation import _deprecate_arguments
 from .utils._typing import CallableT
+from .utils._verification import collect_local_files, resolve_local_root, verify_maps
 from .utils.endpoint_helpers import _is_emission_within_threshold
 
 
 if TYPE_CHECKING:
     from .inference._providers import PROVIDER_T
+    from .utils._verification import FolderVerification
 
 R = TypeVar("R")  # Return type
 CollectionItemType_T = Literal["model", "dataset", "space", "paper", "collection"]
@@ -596,7 +598,7 @@ class RepoFile:
             The file's size, in bytes.
         blob_id (`str`):
             The file's git OID.
-        lfs (`BlobLfsInfo`):
+        lfs (`BlobLfsInfo`, *optional*):
             The file's LFS metadata.
         last_commit (`LastCommitInfo`, *optional*):
             The file's last commit metadata. Only defined if [`list_repo_tree`] and [`get_paths_info`]
@@ -3081,6 +3083,79 @@ class HfApi:
             yield (RepoFile(**path_info) if path_info["type"] == "file" else RepoFolder(**path_info))
 
     @validate_hf_hub_args
+    def verify_repo_checksums(
+        self,
+        repo_id: str,
+        *,
+        repo_type: Optional[str] = None,
+        revision: Optional[str] = None,
+        local_dir: Optional[Union[str, Path]] = None,
+        cache_dir: Optional[Union[str, Path]] = None,
+        token: Union[str, bool, None] = None,
+    ) -> "FolderVerification":
+        """
+        Verify local files for a repo against Hub checksums.
+
+        Args:
+            repo_id (`str`):
+                A namespace (user or an organization) and a repo name separated by a `/`.
+            repo_type (`str`, *optional*):
+                The type of the repository from which to get the tree (`"model"`, `"dataset"` or `"space"`.
+                Defaults to `"model"`.
+            revision (`str`, *optional*):
+                The revision of the repository from which to get the tree. Defaults to `"main"` branch.
+            local_dir (`str` or `Path`, *optional*):
+                The local directory to verify.
+            cache_dir (`str` or `Path`, *optional*):
+                The cache directory to verify.
+            token (Union[bool, str, None], optional):
+                A valid user access token (string). Defaults to the locally saved
+                token, which is the recommended method for authentication (see
+                https://huggingface.co/docs/huggingface_hub/quick-start#authentication).
+                To disable authentication, pass `False`.
+
+        Returns:
+            [`FolderVerification`]: a structured result containing the verification details.
+
+        Raises:
+            [`~utils.RepositoryNotFoundError`]:
+                If repository is not found (error 404): wrong repo_id/repo_type, private but not authenticated or repo
+                does not exist.
+            [`~utils.RevisionNotFoundError`]:
+                If revision is not found (error 404) on the repo.
+
+        """
+
+        if repo_type is None:
+            repo_type = constants.REPO_TYPE_MODEL
+
+        if local_dir is not None and cache_dir is not None:
+            raise ValueError("Pass either `local_dir` or `cache_dir`, not both.")
+
+        root, remote_revision = resolve_local_root(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            revision=revision,
+            cache_dir=Path(cache_dir) if cache_dir is not None else None,
+            local_dir=Path(local_dir) if local_dir is not None else None,
+        )
+        local_by_path = collect_local_files(root)
+
+        # get remote entries
+        remote_by_path: dict[str, Union[RepoFile, RepoFolder]] = {}
+        for entry in self.list_repo_tree(
+            repo_id=repo_id, recursive=True, revision=remote_revision, repo_type=repo_type, token=token
+        ):
+            remote_by_path[entry.path] = entry
+
+        return verify_maps(
+            remote_by_path=remote_by_path,
+            local_by_path=local_by_path,
+            revision=remote_revision,
+            verified_path=root,
+        )
+
+    @validate_hf_hub_args
     def list_repo_refs(
         self,
         repo_id: str,
@@ -5014,7 +5089,7 @@ class HfApi:
             ignore_patterns (`list[str]` or `str`, *optional*):
                 If provided, files matching any of the patterns are not uploaded.
             num_workers (`int`, *optional*):
-                Number of workers to start. Defaults to `os.cpu_count() - 2` (minimum 2).
+                Number of workers to start. Defaults to half of CPU cores (minimum 1).
                 A higher number of workers may speed up the process if your machine allows it. However, on machines with a
                 slower connection, it is recommended to keep the number of workers low to ensure better resumability.
                 Indeed, partially uploaded files will have to be completely re-uploaded if the process is interrupted.
@@ -5141,6 +5216,7 @@ class HfApi:
         etag_timeout: float = constants.DEFAULT_ETAG_TIMEOUT,
         token: Union[bool, str, None] = None,
         local_files_only: bool = False,
+        tqdm_class: Optional[type[base_tqdm]] = None,
         dry_run: Literal[False] = False,
     ) -> str: ...
 
@@ -5159,6 +5235,7 @@ class HfApi:
         etag_timeout: float = constants.DEFAULT_ETAG_TIMEOUT,
         token: Union[bool, str, None] = None,
         local_files_only: bool = False,
+        tqdm_class: Optional[type[base_tqdm]] = None,
         dry_run: Literal[True],
     ) -> DryRunFileInfo: ...
 
@@ -5177,6 +5254,7 @@ class HfApi:
         etag_timeout: float = constants.DEFAULT_ETAG_TIMEOUT,
         token: Union[bool, str, None] = None,
         local_files_only: bool = False,
+        tqdm_class: Optional[type[base_tqdm]] = None,
         dry_run: bool = False,
     ) -> Union[str, DryRunFileInfo]:
         """Download a given file if it's not already present in the local cache.
@@ -5245,6 +5323,11 @@ class HfApi:
             local_files_only (`bool`, *optional*, defaults to `False`):
                 If `True`, avoid downloading the file and return the path to the
                 local cached file if it exists.
+            tqdm_class (`tqdm`, *optional*):
+                If provided, overwrites the default behavior for the progress bar. Passed
+                argument must inherit from `tqdm.auto.tqdm` or at least mimic its behavior.
+                Defaults to the custom HF progress bar that can be disabled by setting
+                `HF_HUB_DISABLE_PROGRESS_BARS` environment variable.
             dry_run (`bool`, *optional*, defaults to `False`):
                 If `True`, perform a dry run without actually downloading the file. Returns a
                 [`DryRunFileInfo`] object containing information about what would be downloaded.
@@ -5294,6 +5377,8 @@ class HfApi:
             token=token,
             headers=self.headers,
             local_files_only=local_files_only,
+            tqdm_class=tqdm_class,
+            dry_run=dry_run,
         )
 
     @validate_hf_hub_args
@@ -5313,7 +5398,8 @@ class HfApi:
         ignore_patterns: Optional[Union[list[str], str]] = None,
         max_workers: int = 8,
         tqdm_class: Optional[type[base_tqdm]] = None,
-    ) -> str:
+        dry_run: bool = False,
+    ) -> Union[str, list[DryRunFileInfo]]:
         """Download repo files.
 
         Download a whole snapshot of a repo's files at the specified revision. This is useful when you want all files from
@@ -5368,9 +5454,14 @@ class HfApi:
                 Note that the `tqdm_class` is not passed to each individual download.
                 Defaults to the custom HF progress bar that can be disabled by setting
                 `HF_HUB_DISABLE_PROGRESS_BARS` environment variable.
+            dry_run (`bool`, *optional*, defaults to `False`):
+                If `True`, perform a dry run without actually downloading the files. Returns a list of
+                [`DryRunFileInfo`] objects containing information about what would be downloaded.
 
         Returns:
-            `str`: folder path of the repo snapshot.
+            `str` or list of [`DryRunFileInfo`]:
+                - If `dry_run=False`: Folder path of the repo snapshot.
+                - If `dry_run=True`: A list of [`DryRunFileInfo`] objects containing download information.
 
         Raises:
             [`~utils.RepositoryNotFoundError`]
@@ -5409,6 +5500,8 @@ class HfApi:
             ignore_patterns=ignore_patterns,
             max_workers=max_workers,
             tqdm_class=tqdm_class,
+            headers=self.headers,
+            dry_run=dry_run,
         )
 
     def get_safetensors_metadata(
@@ -7316,6 +7409,8 @@ class HfApi:
         account_id: Optional[str] = None,
         min_replica: int = 1,
         max_replica: int = 1,
+        scaling_metric: Optional[InferenceEndpointScalingMetric] = None,
+        scaling_threshold: Optional[float] = None,
         scale_to_zero_timeout: Optional[int] = None,
         revision: Optional[str] = None,
         task: Optional[str] = None,
@@ -7356,6 +7451,12 @@ class HfApi:
                 scaling to zero, set this value to 0 and adjust `scale_to_zero_timeout` accordingly. Defaults to 1.
             max_replica (`int`, *optional*):
                 The maximum number of replicas (instances) to scale to for the Inference Endpoint. Defaults to 1.
+            scaling_metric (`str` or [`InferenceEndpointScalingMetric `], *optional*):
+                The metric reference for scaling. Either "pendingRequests" or "hardwareUsage" when provided. Defaults to
+                None (meaning: let the HF Endpoints service specify the metric).
+            scaling_threshold (`float`, *optional*):
+                The scaling metric threshold used to trigger a scale up. Ignored when scaling metric is not provided.
+                Defaults to None (meaning: let the HF Endpoints service specify the threshold).
             scale_to_zero_timeout (`int`, *optional*):
                 The duration in minutes before an inactive endpoint is scaled to zero, or no scaling to zero if
                 set to None and `min_replica` is not 0. Defaults to None.
@@ -7507,6 +7608,8 @@ class HfApi:
             },
             "type": type,
         }
+        if scaling_metric:
+            payload["compute"]["scaling"]["measure"] = {scaling_metric: scaling_threshold}
         if env:
             payload["model"]["env"] = env
         if secrets:
@@ -7671,6 +7774,8 @@ class HfApi:
         min_replica: Optional[int] = None,
         max_replica: Optional[int] = None,
         scale_to_zero_timeout: Optional[int] = None,
+        scaling_metric: Optional[InferenceEndpointScalingMetric] = None,
+        scaling_threshold: Optional[float] = None,
         # Model update
         repository: Optional[str] = None,
         framework: Optional[str] = None,
@@ -7711,7 +7816,12 @@ class HfApi:
                 The maximum number of replicas (instances) to scale to for the Inference Endpoint.
             scale_to_zero_timeout (`int`, *optional*):
                 The duration in minutes before an inactive endpoint is scaled to zero.
-
+            scaling_metric (`str` or [`InferenceEndpointScalingMetric `], *optional*):
+                The metric reference for scaling. Either "pendingRequests" or "hardwareUsage" when provided.
+                Defaults to None.
+            scaling_threshold (`float`, *optional*):
+                The scaling metric threshold used to trigger a scale up. Ignored when scaling metric is not provided.
+                Defaults to None.
             repository (`str`, *optional*):
                 The name of the model repository associated with the Inference Endpoint (e.g. `"gpt2"`).
             framework (`str`, *optional*):
@@ -7765,6 +7875,8 @@ class HfApi:
             payload["compute"]["scaling"]["minReplica"] = min_replica
         if scale_to_zero_timeout is not None:
             payload["compute"]["scaling"]["scaleToZeroTimeout"] = scale_to_zero_timeout
+        if scaling_metric:
+            payload["compute"]["scaling"]["measure"] = {scaling_metric: scaling_threshold}
         if repository is not None:
             payload["model"]["repository"] = repository
         if framework is not None:
@@ -8418,7 +8530,7 @@ class HfApi:
     @validate_hf_hub_args
     def list_pending_access_requests(
         self, repo_id: str, *, repo_type: Optional[str] = None, token: Union[bool, str, None] = None
-    ) -> list[AccessRequest]:
+    ) -> Iterable[AccessRequest]:
         """
         Get pending access requests for a given gated repo.
 
@@ -8441,7 +8553,7 @@ class HfApi:
                 To disable authentication, pass `False`.
 
         Returns:
-            `list[AccessRequest]`: A list of [`AccessRequest`] objects. Each time contains a `username`, `email`,
+            `Iterable[AccessRequest]`: An iterable of [`AccessRequest`] objects. Each time contains a `username`, `email`,
             `status` and `timestamp` attribute. If the gated repo has a custom form, the `fields` attribute will
             be populated with user's answers.
 
@@ -8457,7 +8569,7 @@ class HfApi:
         >>> from huggingface_hub import list_pending_access_requests, accept_access_request
 
         # List pending requests
-        >>> requests = list_pending_access_requests("meta-llama/Llama-2-7b")
+        >>> requests = list(list_pending_access_requests("meta-llama/Llama-2-7b"))
         >>> len(requests)
         411
         >>> requests[0]
@@ -8477,12 +8589,12 @@ class HfApi:
         >>> accept_access_request("meta-llama/Llama-2-7b", "clem")
         ```
         """
-        return self._list_access_requests(repo_id, "pending", repo_type=repo_type, token=token)
+        yield from self._list_access_requests(repo_id, "pending", repo_type=repo_type, token=token)
 
     @validate_hf_hub_args
     def list_accepted_access_requests(
         self, repo_id: str, *, repo_type: Optional[str] = None, token: Union[bool, str, None] = None
-    ) -> list[AccessRequest]:
+    ) -> Iterable[AccessRequest]:
         """
         Get accepted access requests for a given gated repo.
 
@@ -8507,7 +8619,7 @@ class HfApi:
                 To disable authentication, pass `False`.
 
         Returns:
-            `list[AccessRequest]`: A list of [`AccessRequest`] objects. Each time contains a `username`, `email`,
+            `Iterable[AccessRequest]`: An iterable of [`AccessRequest`] objects. Each time contains a `username`, `email`,
             `status` and `timestamp` attribute. If the gated repo has a custom form, the `fields` attribute will
             be populated with user's answers.
 
@@ -8522,7 +8634,7 @@ class HfApi:
         ```py
         >>> from huggingface_hub import list_accepted_access_requests
 
-        >>> requests = list_accepted_access_requests("meta-llama/Llama-2-7b")
+        >>> requests = list(list_accepted_access_requests("meta-llama/Llama-2-7b"))
         >>> len(requests)
         411
         >>> requests[0]
@@ -8539,12 +8651,12 @@ class HfApi:
         ]
         ```
         """
-        return self._list_access_requests(repo_id, "accepted", repo_type=repo_type, token=token)
+        yield from self._list_access_requests(repo_id, "accepted", repo_type=repo_type, token=token)
 
     @validate_hf_hub_args
     def list_rejected_access_requests(
         self, repo_id: str, *, repo_type: Optional[str] = None, token: Union[bool, str, None] = None
-    ) -> list[AccessRequest]:
+    ) -> Iterable[AccessRequest]:
         """
         Get rejected access requests for a given gated repo.
 
@@ -8569,7 +8681,7 @@ class HfApi:
                 To disable authentication, pass `False`.
 
         Returns:
-            `list[AccessRequest]`: A list of [`AccessRequest`] objects. Each time contains a `username`, `email`,
+            `Iterable[AccessRequest]`: An iterable of [`AccessRequest`] objects. Each time contains a `username`, `email`,
             `status` and `timestamp` attribute. If the gated repo has a custom form, the `fields` attribute will
             be populated with user's answers.
 
@@ -8584,7 +8696,7 @@ class HfApi:
         ```py
         >>> from huggingface_hub import list_rejected_access_requests
 
-        >>> requests = list_rejected_access_requests("meta-llama/Llama-2-7b")
+        >>> requests = list(list_rejected_access_requests("meta-llama/Llama-2-7b"))
         >>> len(requests)
         411
         >>> requests[0]
@@ -8601,7 +8713,7 @@ class HfApi:
         ]
         ```
         """
-        return self._list_access_requests(repo_id, "rejected", repo_type=repo_type, token=token)
+        yield from self._list_access_requests(repo_id, "rejected", repo_type=repo_type, token=token)
 
     def _list_access_requests(
         self,
@@ -8609,19 +8721,18 @@ class HfApi:
         status: Literal["accepted", "rejected", "pending"],
         repo_type: Optional[str] = None,
         token: Union[bool, str, None] = None,
-    ) -> list[AccessRequest]:
+    ) -> Iterable[AccessRequest]:
         if repo_type not in constants.REPO_TYPES:
             raise ValueError(f"Invalid repo type, must be one of {constants.REPO_TYPES}")
         if repo_type is None:
             repo_type = constants.REPO_TYPE_MODEL
 
-        response = get_session().get(
+        for request in paginate(
             f"{constants.ENDPOINT}/api/{repo_type}s/{repo_id}/user-access-request/{status}",
+            params={},
             headers=self._build_hf_headers(token=token),
-        )
-        hf_raise_for_status(response)
-        return [
-            AccessRequest(
+        ):
+            yield AccessRequest(
                 username=request["user"]["user"],
                 fullname=request["user"]["fullname"],
                 email=request["user"].get("email"),
@@ -8629,8 +8740,6 @@ class HfApi:
                 timestamp=parse_datetime(request["timestamp"]),
                 fields=request.get("fields"),  # only if custom fields in form
             )
-            for request in response.json()
-        ]
 
     @validate_hf_hub_args
     def cancel_access_request(
@@ -10733,6 +10842,7 @@ list_repo_refs = api.list_repo_refs
 list_repo_commits = api.list_repo_commits
 list_repo_tree = api.list_repo_tree
 get_paths_info = api.get_paths_info
+verify_repo_checksums = api.verify_repo_checksums
 
 get_model_tags = api.get_model_tags
 get_dataset_tags = api.get_dataset_tags

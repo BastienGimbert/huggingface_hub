@@ -89,13 +89,13 @@ Integer value to define the number of seconds to wait for server response when d
 
 ### HF_XET_CHUNK_CACHE_SIZE_BYTES
 
-To set the size of the Xet chunk cache locally. Increasing this will give more space for caching terms/chunks fetched from S3. A larger cache can better take advantage of deduplication across repos & files. If your network speed is much greater than your local disk speed (ex 10Gbps vs SSD or worse) then consider disabling the Xet cache for increased performance. To disable the Xet cache, set `HF_XET_CHUNK_CACHE_SIZE_BYTES=0`.
+To set the size of the Xet chunk cache locally. By default, the chunk cache is disabled. The chunk cache can be beneficial if you are generating new revisions to existing models or datasets as this is used to cache terms/chunks that are fetched from S3. A larger cache can better take advantage of deduplication across repos & files. To enable the chunk cache set the environment variable to a large number (10GB) or greater. However, in most cases when downloading or uploading new data, disabling the chunk cache will have better performance, which is why it is disabled by default.
 
-Defaults to `10000000000` (10GB).
+Defaults to `0` (0 bytes, means chunk cache is disabled).
 
 ### HF_XET_SHARD_CACHE_SIZE_LIMIT
 
-To set the size of the Xet shard cache locally. Increasing this will improve upload effeciency as chunks referenced in cached shard files are not re-uploaded. Note that the default soft limit is likely sufficient for most workloads. 
+To set the size of the Xet shard cache locally. Increasing this will improve upload efficiency as chunks referenced in cached shard files are not re-uploaded. Note that the default soft limit is likely sufficient for most workloads. 
 
 Defaults to `4000000000` (4GB).
 
@@ -125,7 +125,7 @@ If `HF_HUB_OFFLINE=1` is set as environment variable and you call any method of 
 
 ### HF_HUB_DISABLE_IMPLICIT_TOKEN
 
-Authentication is not mandatory for every requests to the Hub. For instance, requesting
+Authentication is not mandatory for every request to the Hub. For instance, requesting
 details about `"gpt2"` model does not require to be authenticated. However, if a user is
 [logged in](../package_reference/login), the default behavior will be to always send the token
 in order to ease user experience (never get a HTTP 401 Unauthorized) when accessing private or gated repositories. For privacy, you can
@@ -138,7 +138,7 @@ would need to explicitly pass `token=True` argument in your script.
 
 ### HF_HUB_DISABLE_PROGRESS_BARS
 
-For time consuming tasks, `huggingface_hub` displays a progress bar by default (using tqdm).
+For time-consuming tasks, `huggingface_hub` displays a progress bar by default (using tqdm).
 You can disable all the progress bars at once by setting `HF_HUB_DISABLE_PROGRESS_BARS=1`.
 
 ### HF_HUB_DISABLE_SYMLINKS_WARNING
@@ -169,7 +169,7 @@ You can set `HF_HUB_DISABLE_TELEMETRY=1` as environment variable to globally dis
 
 ### HF_HUB_DISABLE_XET
 
-Set to disable using `hf-xet`, even if it is available in your Python environment. This is since `hf-xet` will be used automatically if it is found, this allows explicitly disabling its usage.
+Set to disable using `hf-xet`, even if it is available in your Python environment. This is since `hf-xet` will be used automatically if it is found, this allows explicitly disabling its usage. If you are disabling Xet, please consider [filing an issue and including the diagnostics](https://github.com/huggingface/xet-core?tab=readme-ov-file#issues-diagnostics--debugging) information to help us understand why Xet is not working for you.
 
 ### HF_HUB_ENABLE_HF_TRANSFER
 
@@ -184,7 +184,7 @@ Set `hf-xet` to operate with increased settings to maximize network and disk res
 
 Consider this analogous to the legacy `HF_HUB_ENABLE_HF_TRANSFER=1` environment variable but applied to `hf-xet`.
 
-To learn more about the benefits of Xet storage and `hf_xet`, refer to this [section](https://huggingface.co/docs/hub/storage-backends).
+To learn more about the benefits of Xet storage and `hf_xet`, refer to this [section](https://huggingface.co/docs/hub/xet/index).
 
 ### HF_XET_RECONSTRUCT_WRITE_SEQUENTIALLY
 

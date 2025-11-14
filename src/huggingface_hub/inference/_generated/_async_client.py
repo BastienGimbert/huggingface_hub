@@ -126,7 +126,7 @@ class AsyncInferenceClient:
             Note: for better compatibility with OpenAI's client, `model` has been aliased as `base_url`. Those 2
             arguments are mutually exclusive. If a URL is passed as `model` or `base_url` for chat completion, the `(/v1)/chat/completions` suffix path will be appended to the URL.
         provider (`str`, *optional*):
-            Name of the provider to use for inference. Can be `"black-forest-labs"`, `"cerebras"`, `"clarifai"`, `"cohere"`, `"fal-ai"`, `"featherless-ai"`, `"fireworks-ai"`, `"groq"`, `"hf-inference"`, `"hyperbolic"`, `"nebius"`, `"novita"`, `"nscale"`, `"openai"`, `publicai`, `"replicate"`, `"sambanova"`, `"scaleway"`, `"together"` or `"zai-org"`.
+            Name of the provider to use for inference. Can be `"black-forest-labs"`, `"cerebras"`, `"clarifai"`, `"cohere"`, `"fal-ai"`, `"featherless-ai"`, `"fireworks-ai"`, `"groq"`, `"hf-inference"`, `"hyperbolic"`, `"nebius"`, `"novita"`, `"nscale"`, `"openai"`, `"publicai"`, `"replicate"`, `"sambanova"`, `"scaleway"`, `"together"`, `"wavespeed"` or `"zai-org"`.
             Defaults to "auto" i.e. the first of the providers available for the model, sorted by the user's order in https://hf.co/settings/inference-providers.
             If model is a URL or `base_url` is passed, then `provider` is not used.
         token (`str`, *optional*):
@@ -181,7 +181,7 @@ class AsyncInferenceClient:
             )
         token = token if token is not None else api_key
         if isinstance(token, bool):
-            # Legacy behavior: previously is was possible to pass `token=False` to disable authentication. This is not
+            # Legacy behavior: previously it was possible to pass `token=False` to disable authentication. This is not
             # supported anymore as authentication is required. Better to explicitly raise here rather than risking
             # sending the locally saved token without the user knowing about it.
             if token is False:
@@ -472,6 +472,7 @@ class AsyncInferenceClient:
             api_key=self.token,
         )
         response = await self._inner_post(request_parameters)
+        response = provider_helper.get_response(response, request_params=request_parameters)
         return AutomaticSpeechRecognitionOutput.parse_obj_as_instance(response)
 
     @overload
@@ -885,7 +886,7 @@ class AsyncInferenceClient:
         >>> messages = [
         ...     {
         ...         "role": "user",
-        ...         "content": "I saw a puppy a cat and a raccoon during my bike ride in the park. What did I saw and when?",
+        ...         "content": "I saw a puppy a cat and a raccoon during my bike ride in the park. What did I see and when?",
         ...     },
         ... ]
         >>> response_format = {
@@ -1055,7 +1056,7 @@ class AsyncInferenceClient:
         normalize: Optional[bool] = None,
         prompt_name: Optional[str] = None,
         truncate: Optional[bool] = None,
-        truncation_direction: Optional[Literal["Left", "Right"]] = None,
+        truncation_direction: Optional[Literal["left", "right"]] = None,
         model: Optional[str] = None,
     ) -> "np.ndarray":
         """
@@ -1080,7 +1081,7 @@ class AsyncInferenceClient:
             truncate (`bool`, *optional*):
                 Whether to truncate the embeddings or not.
                 Only available on server powered by Text-Embedding-Inference.
-            truncation_direction (`Literal["Left", "Right"]`, *optional*):
+            truncation_direction (`Literal["left", "right"]`, *optional*):
                 Which side of the input should be truncated when `truncate=True` is passed.
 
         Returns:
@@ -1293,6 +1294,7 @@ class AsyncInferenceClient:
             api_key=self.token,
         )
         response = await self._inner_post(request_parameters)
+        response = provider_helper.get_response(response, request_parameters)
         output = ImageSegmentationOutputElement.parse_obj_as_list(response)
         for item in output:
             item.mask = _b64_to_image(item.mask)  # type: ignore [assignment]
@@ -1353,6 +1355,7 @@ class AsyncInferenceClient:
         >>> image = await client.image_to_image("cat.jpg", prompt="turn the cat into a tiger")
         >>> image.save("tiger.jpg")
         ```
+
         """
         model_id = model or self.model
         provider_helper = get_provider_helper(self.provider, task="image-to-image", model=model_id)
@@ -1459,7 +1462,7 @@ class AsyncInferenceClient:
         Takes an input image and return text.
 
         Models can have very different outputs depending on your use case (image captioning, optical character recognition
-        (OCR), Pix2Struct, etc). Please have a look to the model card to learn more about a model's specificities.
+        (OCR), Pix2Struct, etc.). Please have a look to the model card to learn more about a model's specificities.
 
         Args:
             image (`Union[str, Path, bytes, BinaryIO, PIL.Image.Image]`):
@@ -2584,6 +2587,7 @@ class AsyncInferenceClient:
         ... )
         >>> image.save("astronaut.png")
         ```
+
         """
         model_id = model or self.model
         provider_helper = get_provider_helper(self.provider, task="text-to-image", model=model_id)
@@ -2604,7 +2608,7 @@ class AsyncInferenceClient:
             api_key=self.token,
         )
         response = await self._inner_post(request_parameters)
-        response = provider_helper.get_response(response)
+        response = provider_helper.get_response(response, request_parameters)
         return _bytes_to_image(response)
 
     async def text_to_video(
@@ -2682,6 +2686,7 @@ class AsyncInferenceClient:
         >>> with open("cat.mp4", "wb") as file:
         ...     file.write(video)
         ```
+
         """
         model_id = model or self.model
         provider_helper = get_provider_helper(self.provider, task="text-to-video", model=model_id)

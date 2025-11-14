@@ -13,6 +13,7 @@ from .clarifai import ClarifaiConversationalTask
 from .cohere import CohereConversationalTask
 from .fal_ai import (
     FalAIAutomaticSpeechRecognitionTask,
+    FalAIImageSegmentationTask,
     FalAIImageToImageTask,
     FalAIImageToVideoTask,
     FalAITextToImageTask,
@@ -38,10 +39,22 @@ from .novita import NovitaConversationalTask, NovitaTextGenerationTask, NovitaTe
 from .nscale import NscaleConversationalTask, NscaleTextToImageTask
 from .openai import OpenAIConversationalTask
 from .publicai import PublicAIConversationalTask
-from .replicate import ReplicateImageToImageTask, ReplicateTask, ReplicateTextToImageTask, ReplicateTextToSpeechTask
+from .replicate import (
+    ReplicateAutomaticSpeechRecognitionTask,
+    ReplicateImageToImageTask,
+    ReplicateTask,
+    ReplicateTextToImageTask,
+    ReplicateTextToSpeechTask,
+)
 from .sambanova import SambanovaConversationalTask, SambanovaFeatureExtractionTask
 from .scaleway import ScalewayConversationalTask, ScalewayFeatureExtractionTask
 from .together import TogetherConversationalTask, TogetherTextGenerationTask, TogetherTextToImageTask
+from .wavespeed import (
+    WavespeedAIImageToImageTask,
+    WavespeedAIImageToVideoTask,
+    WavespeedAITextToImageTask,
+    WavespeedAITextToVideoTask,
+)
 from .zai_org import ZaiConversationalTask
 
 
@@ -68,6 +81,7 @@ PROVIDER_T = Literal[
     "sambanova",
     "scaleway",
     "together",
+    "wavespeed",
     "zai-org",
 ]
 
@@ -95,6 +109,7 @@ PROVIDERS: dict[PROVIDER_T, dict[str, TaskProviderHelper]] = {
         "text-to-video": FalAITextToVideoTask(),
         "image-to-video": FalAIImageToVideoTask(),
         "image-to-image": FalAIImageToImageTask(),
+        "image-segmentation": FalAIImageSegmentationTask(),
     },
     "featherless-ai": {
         "conversational": FeatherlessConversationalTask(),
@@ -161,6 +176,7 @@ PROVIDERS: dict[PROVIDER_T, dict[str, TaskProviderHelper]] = {
         "conversational": PublicAIConversationalTask(),
     },
     "replicate": {
+        "automatic-speech-recognition": ReplicateAutomaticSpeechRecognitionTask(),
         "image-to-image": ReplicateImageToImageTask(),
         "text-to-image": ReplicateTextToImageTask(),
         "text-to-speech": ReplicateTextToSpeechTask(),
@@ -178,6 +194,12 @@ PROVIDERS: dict[PROVIDER_T, dict[str, TaskProviderHelper]] = {
         "text-to-image": TogetherTextToImageTask(),
         "conversational": TogetherConversationalTask(),
         "text-generation": TogetherTextGenerationTask(),
+    },
+    "wavespeed": {
+        "text-to-image": WavespeedAITextToImageTask(),
+        "text-to-video": WavespeedAITextToVideoTask(),
+        "image-to-image": WavespeedAIImageToImageTask(),
+        "image-to-video": WavespeedAIImageToVideoTask(),
     },
     "zai-org": {
         "conversational": ZaiConversationalTask(),

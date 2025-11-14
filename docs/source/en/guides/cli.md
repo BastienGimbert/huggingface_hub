@@ -4,7 +4,7 @@ rendered properly in your Markdown viewer.
 
 # Command Line Interface (CLI)
 
-The `huggingface_hub` Python package comes with a built-in CLI called `hf`. This tool allows you to interact with the Hugging Face Hub directly from a terminal. For example, you can login to your account, create a repository, upload and download files, etc. It also comes with handy features to configure your machine or manage your cache. In this guide, we will have a look at the main features of the CLI and how to use them.
+The `huggingface_hub` Python package comes with a built-in CLI called `hf`. This tool allows you to interact with the Hugging Face Hub directly from a terminal. For example, you can log in to your account, create a repository, upload and download files, etc. It also comes with handy features to configure your machine or manage your cache. In this guide, we will have a look at the main features of the CLI and how to use them.
 
 > [!TIP]
 > This guide covers the most important features of the `hf` CLI.
@@ -12,21 +12,14 @@ The `huggingface_hub` Python package comes with a built-in CLI called `hf`. This
 
 ## Getting started
 
-First of all, let's install the CLI:
+### Standalone installer (Recommended)
 
-```
->>> pip install -U "huggingface_hub"
-```
-
-> [!TIP]
-> The CLI ships with the core `huggingface_hub` package.
-
-Alternatively, you can install the `hf` CLI with a single command:
+You can install the `hf` CLI with a single command:
 
 On macOS and Linux:
 
 ```bash
->>> curl -LsSf https://hf.co/cli/install.sh | sh
+>>> curl -LsSf https://hf.co/cli/install.sh | bash
 ```
 
 On Windows:
@@ -35,9 +28,9 @@ On Windows:
 >>> powershell -ExecutionPolicy ByPass -c "irm https://hf.co/cli/install.ps1 | iex"
 ```
 
-Once installed, you can check that the CLI is correctly setup:
+Once installed, you can check that the CLI is correctly set up:
 
-```
+```bash
 >>> hf --help
 Usage: hf [OPTIONS] COMMAND [ARGS]...
 
@@ -53,6 +46,7 @@ Commands:
   auth                 Manage authentication (login, logout, etc.).
   cache                Manage local cache directory.
   download             Download files from the Hub.
+  endpoints            Manage Hugging Face Inference Endpoints.
   env                  Print information about the environment.
   jobs                 Run and manage Jobs on the Hub.
   repo                 Manage repos on the Hub.
@@ -67,32 +61,32 @@ If the CLI is correctly installed, you should see a list of all the options avai
 > [!TIP]
 > The `--help` option is very convenient for getting more details about a command. You can use it anytime to list all available options and their details. For example, `hf upload --help` provides more information on how to upload files using the CLI.
 
-### Other installation methods
+### Using uv
 
-#### Using uv
+The easiest way to use the `hf` CLI is with [`uvx`](https://docs.astral.sh/uv/concepts/tools/). It always runs the latest version in an isolated environment - no installation needed!
 
-You can install and run the `hf` CLI with [uv](https://docs.astral.sh/uv/). 
+Make sure `uv` is installed first. See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/) for instructions.
 
-Make sure uv is installed (adds `uv` and `uvx` to your PATH):
-
-```bash
->>> curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Then install the CLI globally and use it anywhere:
+Then use the CLI directly:
 
 ```bash
->>> uv tool install "huggingface_hub"
->>> hf auth whoami
+>>> uvx hf auth login
+>>> uvx hf download
+>>> uvx hf ...
 ```
 
-Alternatively, run the CLI ephemerally with `uvx` (no global install):
+> [!TIP]
+> `uvx hf` uses the [`hf` PyPI package](https://pypi.org/project/hf/).
+
+### Install with pip
+
+The CLI is also shipped with the core `huggingface_hub` package:
 
 ```bash
->>> uvx --from huggingface_hub hf auth whoami
+>>> pip install -U "huggingface_hub"
 ```
 
-#### Using Homebrew
+### Using Homebrew
 
 You can also install the CLI using [Homebrew](https://brew.sh/):
 
@@ -174,7 +168,7 @@ hf download --help
 
 ### Download a single file
 
-To download a single file from a repo, simply provide the repo_id and filename as follow:
+To download a single file from a repo, simply provide the repo_id and filename as follows:
 
 ```bash
 >>> hf download gpt2 config.json
@@ -614,7 +608,7 @@ model/microsoft/UserLM-8b be8f2069189bdf443e554c24e488ff3ff6952691    32.1G 4 da
 Found 1 repo(s) for a total of 1 revision(s) and 32.1G on disk.
 ```
 
-The command supports several output formats for scripting: `--format json` prints structured objects, `--format csv` writes comma-separated rows, and `--quiet` prints only IDs. Combine these with `--cache-dir` to target alternative cache locations. See the [Manage your cache](./manage-cache) guide for advanced workflows.
+The command supports several output formats for scripting: `--format json` prints structured objects, `--format csv` writes comma-separated rows, and `--quiet` prints only IDs. Use `--sort` to order entries by `accessed`, `modified`, `name`, or `size` (append `:asc` or `:desc` to control order), and `--limit` to restrict results to the top N entries. Combine these with `--cache-dir` to target alternative cache locations. See the [Manage your cache](./manage-cache) guide for advanced workflows.
 
 Delete cache entries selected with `hf cache ls --q` by piping the IDs into `hf cache rm`:
 
@@ -672,6 +666,45 @@ Deleted 3 unreferenced revision(s); freed 2.4G.
 ```
 
 As with the other cache commands, `--dry-run`, `--yes`, and `--cache-dir` are available. Refer to the [Manage your cache](./manage-cache) guide for more examples.
+
+## hf cache verify
+
+Use `hf cache verify` to validate local files against their checksums on the Hub. You can verify either a cache snapshot or a regular local directory.
+
+Examples:
+
+```bash
+# Verify main revision of a model in cache
+>>> hf cache verify deepseek-ai/DeepSeek-OCR
+
+# Verify a specific revision
+>>> hf cache verify deepseek-ai/DeepSeek-OCR --revision refs/pr/5
+>>> hf cache verify deepseek-ai/DeepSeek-OCR --revision ef93bf4a377c5d5ed9dca78e0bc4ea50b26fe6a4
+
+# Verify a private repo
+>>> hf cache verify me/private-model --token hf_***
+
+# Verify a dataset
+>>> hf cache verify karpathy/fineweb-edu-100b-shuffle --repo-type dataset
+
+# Verify files in a local directory
+>>> hf cache verify deepseek-ai/DeepSeek-OCR --local-dir /path/to/repo
+```
+
+By default, the command warns about missing or extra files. Use flags to turn these warnings into errors:
+
+```bash
+>>> hf cache verify deepseek-ai/DeepSeek-OCR --fail-on-missing-files --fail-on-extra-files
+```
+
+On success, you will see a summary:
+
+```text
+✅ Verified 13 file(s) for 'deepseek-ai/DeepSeek-OCR' (model) in ~/.cache/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6
+  All checksums match.
+```
+
+If mismatches are detected, the command prints a detailed list and exits with a non-zero status.
 
 ## hf repo tag create
 
@@ -977,3 +1010,34 @@ Manage scheduled jobs using
 # Delete a scheduled job
 >>> hf jobs scheduled delete <scheduled_job_id>
 ```
+
+## hf endpoints
+
+Use `hf endpoints` to list, deploy, describe, and manage Inference Endpoints directly from the terminal. The legacy
+`hf inference-endpoints` alias remains available for compatibility.
+
+```bash
+# Lists endpoints in your namespace
+>>> hf endpoints ls
+
+# Deploy an endpoint from Model Catalog
+>>> hf endpoints catalog deploy --repo openai/gpt-oss-120b --name my-endpoint
+
+# Deploy an endpoint from the Hugging Face Hub 
+>>> hf endpoints deploy my-endpoint --repo gpt2 --framework pytorch --accelerator cpu --instance-size x2 --instance-type intel-icl
+
+# List catalog entries
+>>> hf endpoints catalog ls
+
+# Show status and metadata
+>>> hf endpoints describe my-endpoint
+
+# Pause the endpoint
+>>> hf endpoints pause my-endpoint
+
+# Delete without confirmation prompt
+>>> hf endpoints delete my-endpoint --yes
+```
+
+> [!TIP]
+> Add `--namespace` to target an organization, `--token` to override authentication.
